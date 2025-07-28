@@ -65,7 +65,7 @@ if uploaded_file:
 vector_store = Chroma(
     embedding_function=embedding_model,
     client_settings=Settings(anonymized_telemetry=False),
-    in_memory=True  # <--- This makes it compatible with Streamlit Cloud
+    #in_memory=True  # <--- This makes it compatible with Streamlit Cloud
 )
 retriever = vector_store.as_retriever(search_kwargs={"k": 4})
 
