@@ -2,8 +2,8 @@ import os
 import streamlit as st
 import hashlib
 from pathlib import Path
+import asyncio
 
-# LangChain & Chroma
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_chroma import Chroma
 from chromadb.config import Settings
@@ -11,22 +11,27 @@ from langchain.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 
+# Ensure async loop (for Streamlit compatibility)
+try:
+    asyncio.get_running_loop()
+except RuntimeError:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
 # Constants
 PERSIST_DIR = "chroma_db"
 SUPPORTED_EXTS = {".pdf", ".docx", ".pptx", ".xlsx"}
 
-# Load API Key securely from .streamlit/secrets.toml
+# Load API Key securely
 os.environ["GOOGLE_API_KEY"] = st.secrets["GOOGLE_API_KEY"]
-
-# Embedding model
 embedding_model = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
 
-# Streamlit UI
+# UI Layout
 st.title("📄 AI Document Agent")
-uploaded_file = st.file_uploader("Upload a document (PDF, Word, PPT, Excel)", type=["pdf", "docx", "pptx", "xlsx"])
+uploaded_file = st.file_uploader("Upload a document (PDF, Word, PPT, Excel)", type=list(SUPPORTED_EXTS))
 user_input = st.text_area("💬 Ask your question below:")
 
-# Save and hash uploaded file
+# Save uploaded file to disk
 def save_file(file):
     file_path = Path("uploaded_files") / file.name
     file_path.parent.mkdir(exist_ok=True)
@@ -38,12 +43,12 @@ def get_file_hash(file_path):
     with open(file_path, "rb") as f:
         return hashlib.md5(f.read()).hexdigest()
 
-# External loader logic
+# Import and call loader
 def process_new_file(file_path):
     from load_document import process_document
     process_document(file_path)
 
-# File Upload & Deduplication
+# File handling
 if uploaded_file:
     file_path = save_file(uploaded_file)
     file_hash = get_file_hash(file_path)
@@ -56,20 +61,19 @@ if uploaded_file:
     else:
         st.info("ℹ️ This file was already processed. Using existing data.")
 
-# Load vector store with updated Chroma client settings
+# Load Chroma vector store
 vector_store = Chroma(
     persist_directory=PERSIST_DIR,
     embedding_function=embedding_model,
     client_settings=Settings(anonymized_telemetry=False)
+
 )
 retriever = vector_store.as_retriever(search_kwargs={"k": 4})
 
 # Prompt Template for RAG
 template = """
-You are a helpful AI assistant trained on specific document or content uploaded by user.
-Only answer questions based on the uploaded document. If the question is unrelated to those topics, politely respond that you cannot assist.
-
-Use the context below to answer the question.
+You are a helpful AI assistant trained on specific documents uploaded by the user.
+Only answer questions based on the uploaded document. If the question is unrelated, respond politely that you cannot help.
 
 Context:
 {context}
@@ -89,7 +93,7 @@ rag_chain = (
     | parser
 )
 
-# Run Q&A
+# Answer user query
 if user_input:
     with st.spinner("Generating response..."):
         result = rag_chain.invoke(user_input)
