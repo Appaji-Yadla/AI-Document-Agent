@@ -62,7 +62,7 @@ if uploaded_file:
         st.info("ℹ️ This file was already processed. Using existing data.")
 
 # Load Chroma vector store
-vectorstore = Chroma(
+vector_store = Chroma(
     embedding_function=embedding_model,
     client_settings=Settings(anonymized_telemetry=False),
     in_memory=True  # <--- This makes it compatible with Streamlit Cloud
