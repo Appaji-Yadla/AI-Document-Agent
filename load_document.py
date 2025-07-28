@@ -5,9 +5,15 @@ import hashlib
 
 from langchain_community.document_loaders import UnstructuredFileLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_chroma import Chroma  # ✅ Correct import
+#from langchain_chroma import Chroma  # ✅ Correct import
 from chromadb.config import Settings  # ✅ Chroma client settings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
+
+vector_store = Chroma(
+    persist_directory=PERSIST_DIR,
+    embedding_function=embedding_model,
+    client_settings=Settings(chroma_api_impl="chromadb.api.local.LocalAPI")  # ✅ This line is required on Streamlit Cloud
+)
 
 # Constants
 PERSIST_DIR = "chroma_db"
