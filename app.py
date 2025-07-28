@@ -1,100 +1,50 @@
-import os
 import streamlit as st
-import hashlib
-from pathlib import Path
-import asyncio
-
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-from langchain_chroma import Chroma
-from chromadb.config import Settings
+from load_document import load_file, split_documents, create_vector_store
 from langchain.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough
+from langchain_google_genai import ChatGoogleGenerativeAI
+import os
 
-# Ensure async loop (for Streamlit compatibility)
-try:
-    asyncio.get_running_loop()
-except RuntimeError:
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+# Load API Key
+api_key = st.secrets["GEMINI_API_KEY"]
 
-# Constants
-PERSIST_DIR = "chroma_db"
-SUPPORTED_EXTS = {".pdf", ".docx", ".pptx", ".xlsx"}
+st.set_page_config(page_title="AI Document Agent", layout="wide")
+st.title("📄 AI Document Q&A Agent")
 
-# Load API Key securely
-os.environ["GOOGLE_API_KEY"] = st.secrets["GOOGLE_API_KEY"]
-embedding_model = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+uploaded_file = st.file_uploader("Upload a document (PDF, Word, Excel, PowerPoint)", type=["pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt"])
 
-# UI Layout
-st.title("📄 AI Document Agent")
-uploaded_file = st.file_uploader("Upload a document (PDF, Word, PPT, Excel)", type=list(SUPPORTED_EXTS))
-user_input = st.text_area("💬 Ask your question below:")
-
-# Save uploaded file to disk
-def save_file(file):
-    file_path = Path("uploaded_files") / file.name
-    file_path.parent.mkdir(exist_ok=True)
-    with open(file_path, "wb") as f:
-        f.write(file.getbuffer())
-    return file_path
-
-def get_file_hash(file_path):
-    with open(file_path, "rb") as f:
-        return hashlib.md5(f.read()).hexdigest()
-
-# Import and call loader
-def process_new_file(file_path):
-    from load_document import process_document
-    process_document(file_path)
-
-# File handling
 if uploaded_file:
-    file_path = save_file(uploaded_file)
-    file_hash = get_file_hash(file_path)
-    meta_path = Path(PERSIST_DIR) / f"{file_hash}.meta"
+    # Save uploaded file to temp
+    file_path = os.path.join("temp", uploaded_file.name)
+    os.makedirs("temp", exist_ok=True)
+    with open(file_path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+    
+    # Load and split documents
+    docs = load_file(file_path)
+    splits = split_documents(docs)
+    vector_store = create_vector_store(splits, api_key)
+    retriever = vector_store.as_retriever(search_kwargs={"k": 4})
 
-    if not meta_path.exists():
-        with st.spinner("Processing and embedding document..."):
-            process_new_file(file_path)
-        st.success("✅ File embedded and stored.")
-    else:
-        st.info("ℹ️ This file was already processed. Using existing data.")
+    # Set up LLM
+    model = ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=api_key)
+    prompt_template = ChatPromptTemplate.from_template(
+        """
+        You are a helpful AI assistant for answering questions from company documents.
 
-# Load Chroma vector store
-vector_store = Chroma(
-    embedding_function=embedding_model,
-    client_settings=Settings(anonymized_telemetry=False),
-    #in_memory=True  # <--- This makes it compatible with Streamlit Cloud
-)
-retriever = vector_store.as_retriever(search_kwargs={"k": 4})
+        Context: {context}
 
-# Prompt Template for RAG
-template = """
-You are a helpful AI assistant trained on specific documents uploaded by the user.
-Only answer questions based on the uploaded document. If the question is unrelated, respond politely that you cannot help.
+        Question: {question}
+        """
+    )
+    chain = prompt_template | model | StrOutputParser()
 
-Context:
-{context}
-
-Question:
-{question}
-"""
-
-prompt = ChatPromptTemplate.from_template(template)
-llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.3)
-parser = StrOutputParser()
-
-rag_chain = (
-    {"context": retriever | RunnablePassthrough(), "question": RunnablePassthrough()}
-    | prompt
-    | llm
-    | parser
-)
-
-# Answer user query
-if user_input:
-    with st.spinner("Generating response..."):
-        result = rag_chain.invoke(user_input)
-        st.markdown("### 🤖 AI Response:")
-        st.write(result)
+    # User Query
+    question = st.text_input("Ask a question about the document:")
+    if question:
+        with st.spinner("Generating answer..."):
+            context_docs = retriever.invoke(question)
+            context = "\n\n".join([doc.page_content for doc in context_docs])
+            response = chain.invoke({"context": context, "question": question})
+            st.success("Answer:")
+            st.write(response)
