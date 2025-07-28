@@ -3,10 +3,21 @@ import streamlit as st
 import hashlib
 from pathlib import Path
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-from langchain_chroma import Chroma
+#from langchain_chroma import Chroma
 from langchain.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
+
+from chromadb.config import Settings  # ✅ Add this import
+
+# ...
+
+vector_store = Chroma(
+    persist_directory=PERSIST_DIR,
+    embedding_function=embedding_model,
+    client_settings=Settings(chroma_api_impl="chromadb.api.local.LocalAPI")  # ✅ This line is required on Streamlit Cloud
+)
+
 
 # Constants testing
 PERSIST_DIR = "chroma_db"
