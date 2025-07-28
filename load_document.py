@@ -1,64 +1,43 @@
 import os
-import streamlit as st
-from pathlib import Path
-import hashlib
-
-from langchain_community.document_loaders import UnstructuredFileLoader
+import asyncio
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_chroma import Chroma
-from chromadb.config import Settings
+from langchain_community.document_loaders import (
+    PyPDFLoader,
+    UnstructuredWordDocumentLoader,
+    UnstructuredExcelLoader,
+    UnstructuredPowerPointLoader,
+)
+from langchain_community.vectorstores import FAISS
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
-# Constants
-PERSIST_DIR = "chroma_db"
-SUPPORTED_EXTS = {
-    ".pdf": "pdf",
-    ".docx": "docx",
-    ".pptx": "pptx",
-    ".xlsx": "xlsx"
-}
+def load_file(file_path):
+    ext = os.path.splitext(file_path)[-1].lower()
+    if ext == ".pdf":
+        loader = PyPDFLoader(file_path)
+    elif ext in [".docx", ".doc"]:
+        loader = UnstructuredWordDocumentLoader(file_path)
+    elif ext in [".xlsx", ".xls"]:
+        loader = UnstructuredExcelLoader(file_path)
+    elif ext in [".pptx", ".ppt"]:
+        loader = UnstructuredPowerPointLoader(file_path)
+    else:
+        raise ValueError("Unsupported file type.")
+    return loader.load()
 
-# Load API Key from Streamlit Secrets
-os.environ["GOOGLE_API_KEY"] = st.secrets["GOOGLE_API_KEY"]
+def split_documents(docs, chunk_size=1000, chunk_overlap=100):
+    splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    return splitter.split_documents(docs)
 
-# Embedding model
-embedding_model = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+def create_vector_store(splits, api_key):
+    # Ensure there's a running event loop
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
 
-# Helper: Hashing file for duplicate detection
-def get_file_hash(file_path):
-    with open(file_path, "rb") as f:
-        return hashlib.md5(f.read()).hexdigest()
-
-# Main document processing function
-def process_document(file_path):
-    ext = file_path.suffix.lower()
-    if ext not in SUPPORTED_EXTS:
-        print(f"❌ Unsupported file type: {file_path.name}")
-        return
-
-    file_hash = get_file_hash(file_path)
-    meta_path = Path(PERSIST_DIR) / f"{file_hash}.meta"
-    if meta_path.exists():
-        print(f"⚠️ Skipping already processed file: {file_path.name}")
-        return
-
-    print(f"📄 Processing file: {file_path.name}")
-    loader = UnstructuredFileLoader(str(file_path), file_type=SUPPORTED_EXTS[ext])
-    docs = loader.load()
-
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-    chunks = splitter.split_documents(docs)
-
-    Chroma.from_documents(
-        chunks,
-        embedding=embedding_model,
-        persist_directory=PERSIST_DIR,
-        client_settings=Settings(anonymized_telemetry=False)
-
-    )
-
-    # Mark file as processed
-    with open(meta_path, "w") as f:
-        f.write("processed")
-
-    print(f"✅ {file_path.name} processed and stored in vector DB.")
+    # Init Embeddings
+    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=api_key)
+    
+    # Build FAISS vector store
+    vector_store = FAISS.from_documents(splits, embeddings)
+    return vector_store
