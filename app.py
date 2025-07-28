@@ -8,7 +8,7 @@ from langchain.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 
-# Constants
+# Constants testing
 PERSIST_DIR = "chroma_db"
 SUPPORTED_EXTS = {".pdf", ".docx", ".pptx", ".xlsx"}
 
